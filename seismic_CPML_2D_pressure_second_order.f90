@@ -146,8 +146,10 @@
   logical, parameter :: USE_PML_YMAX = .true.
 
 ! total number of grid points in each direction of the grid
-  integer, parameter :: NX = 2001
-  integer, parameter :: NY = 2001
+! total number of time steps
+  integer, parameter :: NX = 1001
+  integer, parameter :: NY = NX
+  integer, parameter :: NSTEP = 4000
 
 ! size of a grid cell
   double precision, parameter :: DELTAX = 1.5d0
@@ -161,9 +163,6 @@
   double precision, parameter :: cp_unrelaxed = 2000.d0
   double precision, parameter :: density = 2000.d0
 
-! total number of time steps
-  integer, parameter :: NSTEP = 1500
-
 ! time step in seconds
   double precision, parameter :: DELTAT = 5.2d-4
 
@@ -173,8 +172,8 @@
   double precision, parameter :: factor = 1.d0
 
 ! source (in pressure)
-  double precision, parameter :: xsource = 1500.d0
-  double precision, parameter :: ysource = 1500.d0
+  double precision, parameter :: xsource = 10.d0
+  double precision, parameter :: ysource = 10.d0
   integer, parameter :: ISOURCE = xsource / DELTAX + 1
   integer, parameter :: JSOURCE = ysource / DELTAY + 1
 
@@ -214,6 +213,8 @@
 ! from Stephen Gedney's unpublished class notes for class EE699, lecture 8, slide 8-11
   double precision, parameter :: K_MAX_PML = 1.d0
   double precision, parameter :: ALPHA_MAX_PML = 2.d0*PI*(f0/2.d0) ! from Festa and Vilotte
+
+  real :: start, finish
 
 ! arrays for the memory variables
 ! could declare these arrays in PML only to save a lot of memory, but proof of concept only here
@@ -256,6 +257,7 @@
 !--- program starts here
 !---
 
+
   print *
   print *,'2D acoustic finite-difference code in pressure formulation with C-PML'
   print *
@@ -264,6 +266,7 @@
   print *
   print *,'NX = ',NX
   print *,'NY = ',NY
+  print *,'NT = ',NSTEP
   print *
   print *,'size of the model along X = ',(NX - 1) * DELTAX
   print *,'size of the model along Y = ',(NY - 1) * DELTAY
@@ -535,7 +538,7 @@
 !---
 !---  beginning of time loop
 !---
-
+  call cpu_time(start)
   do it = 1,NSTEP
 
 ! compute the first spatial derivatives divided by density
@@ -628,40 +631,42 @@
 ! Dirichlet condition for pressure on the top boundary
   pressure_future(:,NY) = ZERO
 
-! store seismograms
-  do irec = 1,NREC
-    sispressure(it,irec) = pressure_future(ix_rec(irec),iy_rec(irec))
-  enddo
-
-! output information
-  if (mod(it,IT_DISPLAY) == 0 .or. it == 5) then
-
-! print maximum of pressure and of norm of velocity
-    pressurenorm = maxval(abs(pressure_future))
-    print *,'Time step # ',it,' out of ',NSTEP
-    print *,'Time: ',sngl((it-1)*DELTAT),' seconds'
-    print *,'Max absolute value of pressure = ',pressurenorm
-    print *
-! check stability of the code, exit if unstable
-    if (pressurenorm > STABILITY_THRESHOLD) stop 'code became unstable and blew up'
-
-    call create_color_image(pressure_future,NX,NY,it,ISOURCE,JSOURCE,ix_rec,iy_rec,nrec, &
-                         NPOINTS_PML,USE_PML_XMIN,USE_PML_XMAX,USE_PML_YMIN,USE_PML_YMAX,3)
-
-  endif
-
-! move new values to old values (the present becomes the past, the future becomes the present)
-  pressure_past(:,:) = pressure_present(:,:)
-  pressure_present(:,:) = pressure_future(:,:)
-
-  enddo   ! end of the time loop
-
-! save seismograms
-  call write_seismograms(sispressure,NSTEP,NREC,DELTAT,t0)
-
-  print *
-  print *,'End of the simulation'
-  print *
+! ! store seismograms
+!   do irec = 1,NREC
+!     sispressure(it,irec) = pressure_future(ix_rec(irec),iy_rec(irec))
+!   enddo
+! 
+! ! output information
+!   if (mod(it,IT_DISPLAY) == 0 .or. it == 5) then
+! 
+! ! print maximum of pressure and of norm of velocity
+!     pressurenorm = maxval(abs(pressure_future))
+!     print *,'Time step # ',it,' out of ',NSTEP
+!     print *,'Time: ',sngl((it-1)*DELTAT),' seconds'
+!     print *,'Max absolute value of pressure = ',pressurenorm
+!     print *
+! ! check stability of the code, exit if unstable
+!     if (pressurenorm > STABILITY_THRESHOLD) stop 'code became unstable and blew up'
+! 
+!     call create_color_image(pressure_future,NX,NY,it,ISOURCE,JSOURCE,ix_rec,iy_rec,nrec, &
+!                          NPOINTS_PML,USE_PML_XMIN,USE_PML_XMAX,USE_PML_YMIN,USE_PML_YMAX,3)
+! 
+!   endif
+! 
+! ! move new values to old values (the present becomes the past, the future becomes the present)
+!   pressure_past(:,:) = pressure_present(:,:)
+!   pressure_present(:,:) = pressure_future(:,:)
+! 
+   enddo   ! end of the time loop
+   call cpu_time(finish)
+   print '("Time = ",f6.3," seconds.")',finish-start
+! 
+! ! save seismograms
+!   call write_seismograms(sispressure,NSTEP,NREC,DELTAT,t0)
+! 
+!   print *
+!   print *,'End of the simulation'
+!   print *
 
   end program seismic_CPML_2D_pressure
 

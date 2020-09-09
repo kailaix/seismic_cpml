@@ -129,8 +129,13 @@
   implicit none
 
 ! total number of grid points in each direction of the grid
-  integer, parameter :: NX = 101
-  integer, parameter :: NY = 641
+! total number of time steps
+! the time step is twice smaller for this fourth-order simulation,
+! therefore let us double the number of time steps to keep the same total duration
+  integer, parameter :: NX = 1001
+  integer, parameter :: NY = NX
+  integer, parameter :: NSTEP = 100
+
 
 ! size of a grid cell
   double precision, parameter :: DELTAX = 10.d0
@@ -149,11 +154,6 @@
   double precision, parameter :: cp = 3300.d0
   double precision, parameter :: cs = cp / 1.732d0
   double precision, parameter :: density = 2800.d0
-
-! total number of time steps
-! the time step is twice smaller for this fourth-order simulation,
-! therefore let us double the number of time steps to keep the same total duration
-  integer, parameter :: NSTEP = 2000 * 2
 
 ! time step in seconds
 ! fourth-order in space and second-order in time finite-difference schemes
@@ -218,6 +218,8 @@
   double precision, parameter :: K_MAX_PML = 1.d0
   double precision, parameter :: ALPHA_MAX_PML = 2.d0*PI*(f0/2.d0) ! from Festa and Vilotte
 
+  real :: start, finish
+
 ! arrays for the memory variables
 ! could declare these arrays in PML only to save a lot of memory, but proof of concept only here
   double precision, dimension(0:NX+1,0:NY+1) :: &
@@ -274,6 +276,7 @@
   print *
   print *,'NX = ',NX
   print *,'NY = ',NY
+  print *,'NT = ',NSTEP
   print *
   print *,'size of the model along X = ',(NX - 1) * DELTAX
   print *,'size of the model along Y = ',(NY - 1) * DELTAY
@@ -548,6 +551,7 @@
 !---  beginning of time loop
 !---
 
+  call cpu_time(start)
   do it = 1,NSTEP
 
 !------------------------------------------------------------
@@ -680,137 +684,139 @@
   vy(:,1) = ZERO
   vy(:,NY) = ZERO
 
-! store seismograms
-  do irec = 1,NREC
-    sisvx(it,irec) = vx(ix_rec(irec),iy_rec(irec))
-    sisvy(it,irec) = vy(ix_rec(irec),iy_rec(irec))
-  enddo
-
-! compute total energy in the medium (without the PML layers)
-
-! compute kinetic energy first, defined as 1/2 rho ||v||^2
-! in principle we should use rho_half_x_half_y instead of rho for vy
-! in order to interpolate density at the right location in the staggered grid cell
-! but in a homogeneous medium we can safely ignore it
-  total_energy_kinetic(it) = 0.5d0 * sum( &
-      rho(NPOINTS_PML:NX-NPOINTS_PML+1,NPOINTS_PML:NY-NPOINTS_PML+1)*( &
-       vx(NPOINTS_PML:NX-NPOINTS_PML+1,NPOINTS_PML:NY-NPOINTS_PML+1)**2 +  &
-       vy(NPOINTS_PML:NX-NPOINTS_PML+1,NPOINTS_PML:NY-NPOINTS_PML+1)**2))
-
-! add potential energy, defined as 1/2 epsilon_ij sigma_ij
-! in principle we should interpolate the medium parameters at the right location
-! in the staggered grid cell but in a homogeneous medium we can safely ignore it
-  total_energy_potential(it) = ZERO
-  do j = NPOINTS_PML, NY-NPOINTS_PML+1
-    do i = NPOINTS_PML, NX-NPOINTS_PML+1
-      epsilon_xx = ((lambda(i,j) + 2.d0*mu(i,j)) * sigmaxx(i,j) - lambda(i,j) * &
-        sigmayy(i,j)) / (4.d0 * mu(i,j) * (lambda(i,j) + mu(i,j)))
-      epsilon_yy = ((lambda(i,j) + 2.d0*mu(i,j)) * sigmayy(i,j) - lambda(i,j) * &
-        sigmaxx(i,j)) / (4.d0 * mu(i,j) * (lambda(i,j) + mu(i,j)))
-      epsilon_xy = sigmaxy(i,j) / (2.d0 * mu(i,j))
-      total_energy_potential(it) = total_energy_potential(it) + &
-        0.5d0 * (epsilon_xx * sigmaxx(i,j) + epsilon_yy * sigmayy(i,j) + 2.d0 * epsilon_xy * sigmaxy(i,j))
-    enddo
-  enddo
-
-! output information
-  if (mod(it,IT_DISPLAY) == 0 .or. it == 5) then
-
-! print maximum of norm of velocity
-    velocnorm = maxval(sqrt(vx**2 + vy**2))
-    print *,'Time step # ',it,' out of ',NSTEP
-    print *,'Time: ',sngl((it-1)*DELTAT),' seconds'
-    print *,'Max norm velocity vector V (m/s) = ',velocnorm
-    print *,'total energy = ',total_energy_kinetic(it) + total_energy_potential(it)
-    print *
-! check stability of the code, exit if unstable
-    if (velocnorm > STABILITY_THRESHOLD) stop 'code became unstable and blew up'
-
-    call create_color_image(vx,NX+2,NY+2,it,ISOURCE,JSOURCE,ix_rec,iy_rec,nrec, &
-                         NPOINTS_PML,USE_PML_XMIN,USE_PML_XMAX,USE_PML_YMIN,USE_PML_YMAX,1)
-    call create_color_image(vy,NX+2,NY+2,it,ISOURCE,JSOURCE,ix_rec,iy_rec,nrec, &
-                         NPOINTS_PML,USE_PML_XMIN,USE_PML_XMAX,USE_PML_YMIN,USE_PML_YMAX,2)
-
-  endif
-
+! ! store seismograms
+!   do irec = 1,NREC
+!     sisvx(it,irec) = vx(ix_rec(irec),iy_rec(irec))
+!     sisvy(it,irec) = vy(ix_rec(irec),iy_rec(irec))
+!   enddo
+! 
+! ! compute total energy in the medium (without the PML layers)
+! 
+! ! compute kinetic energy first, defined as 1/2 rho ||v||^2
+! ! in principle we should use rho_half_x_half_y instead of rho for vy
+! ! in order to interpolate density at the right location in the staggered grid cell
+! ! but in a homogeneous medium we can safely ignore it
+!   total_energy_kinetic(it) = 0.5d0 * sum( &
+!       rho(NPOINTS_PML:NX-NPOINTS_PML+1,NPOINTS_PML:NY-NPOINTS_PML+1)*( &
+!        vx(NPOINTS_PML:NX-NPOINTS_PML+1,NPOINTS_PML:NY-NPOINTS_PML+1)**2 +  &
+!        vy(NPOINTS_PML:NX-NPOINTS_PML+1,NPOINTS_PML:NY-NPOINTS_PML+1)**2))
+! 
+! ! add potential energy, defined as 1/2 epsilon_ij sigma_ij
+! ! in principle we should interpolate the medium parameters at the right location
+! ! in the staggered grid cell but in a homogeneous medium we can safely ignore it
+!   total_energy_potential(it) = ZERO
+!   do j = NPOINTS_PML, NY-NPOINTS_PML+1
+!     do i = NPOINTS_PML, NX-NPOINTS_PML+1
+!       epsilon_xx = ((lambda(i,j) + 2.d0*mu(i,j)) * sigmaxx(i,j) - lambda(i,j) * &
+!         sigmayy(i,j)) / (4.d0 * mu(i,j) * (lambda(i,j) + mu(i,j)))
+!       epsilon_yy = ((lambda(i,j) + 2.d0*mu(i,j)) * sigmayy(i,j) - lambda(i,j) * &
+!         sigmaxx(i,j)) / (4.d0 * mu(i,j) * (lambda(i,j) + mu(i,j)))
+!       epsilon_xy = sigmaxy(i,j) / (2.d0 * mu(i,j))
+!       total_energy_potential(it) = total_energy_potential(it) + &
+!         0.5d0 * (epsilon_xx * sigmaxx(i,j) + epsilon_yy * sigmayy(i,j) + 2.d0 * epsilon_xy * sigmaxy(i,j))
+!     enddo
+!   enddo
+! 
+! ! output information
+!   if (mod(it,IT_DISPLAY) == 0 .or. it == 5) then
+! 
+! ! print maximum of norm of velocity
+!     velocnorm = maxval(sqrt(vx**2 + vy**2))
+!     print *,'Time step # ',it,' out of ',NSTEP
+!     print *,'Time: ',sngl((it-1)*DELTAT),' seconds'
+!     print *,'Max norm velocity vector V (m/s) = ',velocnorm
+!     print *,'total energy = ',total_energy_kinetic(it) + total_energy_potential(it)
+!     print *
+! ! check stability of the code, exit if unstable
+!     if (velocnorm > STABILITY_THRESHOLD) stop 'code became unstable and blew up'
+! 
+!     call create_color_image(vx,NX+2,NY+2,it,ISOURCE,JSOURCE,ix_rec,iy_rec,nrec, &
+!                          NPOINTS_PML,USE_PML_XMIN,USE_PML_XMAX,USE_PML_YMIN,USE_PML_YMAX,1)
+!     call create_color_image(vy,NX+2,NY+2,it,ISOURCE,JSOURCE,ix_rec,iy_rec,nrec, &
+!                          NPOINTS_PML,USE_PML_XMIN,USE_PML_XMAX,USE_PML_YMIN,USE_PML_YMAX,2)
+! 
+!   endif
+! 
   enddo   ! end of time loop
-
-! save seismograms
-  call write_seismograms(sisvx,sisvy,NSTEP,NREC,DELTAT)
-
-! save total energy
-  open(unit=20,file='energy.dat',status='unknown')
-  do it = 1,NSTEP
-    write(20,*) sngl(dble(it-1)*DELTAT),sngl(total_energy_kinetic(it)), &
-       sngl(total_energy_potential(it)),sngl(total_energy_kinetic(it) + total_energy_potential(it))
-  enddo
-  close(20)
-
-! create script for Gnuplot for total energy
-  open(unit=20,file='plot_energy',status='unknown')
-  write(20,*) '# set term x11'
-  write(20,*) 'set term postscript landscape monochrome dashed "Helvetica" 22'
-  write(20,*)
-  write(20,*) 'set xlabel "Time (s)"'
-  write(20,*) 'set ylabel "Total energy"'
-  write(20,*)
-  write(20,*) 'set output "cpml_total_energy_semilog.eps"'
-  write(20,*) 'set logscale y'
-  write(20,*) 'plot "energy.dat" us 1:2 t ''Ec'' w l lc 1, "energy.dat" us 1:3 &
-              & t ''Ep'' w l lc 3, "energy.dat" us 1:4 t ''Total energy'' w l lc 4'
-  write(20,*) 'pause -1 "Hit any key..."'
-  write(20,*)
-  close(20)
-
-  open(unit=20,file='plot_comparison',status='unknown')
-  write(20,*) '# set term x11'
-  write(20,*) 'set term postscript landscape monochrome dashed "Helvetica" 22'
-  write(20,*)
-  write(20,*) 'set xlabel "Time (s)"'
-  write(20,*) 'set ylabel "Total energy"'
-  write(20,*)
-  write(20,*) 'set output "compare_total_energy_semilog.eps"'
-  write(20,*) 'set logscale y'
-  write(20,*) 'plot "energy.dat" us 1:4 t ''Total energy CPML'' w l lc 1, &
-              & "../collino/energy.dat" us 1:4 t ''Total energy Collino'' w l lc 2'
-  write(20,*) 'pause -1 "Hit any key..."'
-  write(20,*)
-  close(20)
-
-! create script for Gnuplot
-  open(unit=20,file='plotgnu',status='unknown')
-  write(20,*) 'set term x11'
-  write(20,*) '# set term postscript landscape monochrome dashed "Helvetica" 22'
-  write(20,*)
-  write(20,*) 'set xlabel "Time (s)"'
-  write(20,*) 'set ylabel "Amplitude (m / s)"'
-  write(20,*)
-
-  write(20,*) 'set output "v_sigma_Vx_receiver_001.eps"'
-  write(20,*) 'plot "Vx_file_001.dat" t ''Vx C-PML'' w l lc 1'
-  write(20,*) 'pause -1 "Hit any key..."'
-  write(20,*)
-
-  write(20,*) 'set output "v_sigma_Vy_receiver_001.eps"'
-  write(20,*) 'plot "Vy_file_001.dat" t ''Vy C-PML'' w l lc 1'
-  write(20,*) 'pause -1 "Hit any key..."'
-  write(20,*)
-
-  write(20,*) 'set output "v_sigma_Vx_receiver_002.eps"'
-  write(20,*) 'plot "Vx_file_002.dat" t ''Vx C-PML'' w l lc 1'
-  write(20,*) 'pause -1 "Hit any key..."'
-  write(20,*)
-
-  write(20,*) 'set output "v_sigma_Vy_receiver_002.eps"'
-  write(20,*) 'plot "Vy_file_002.dat" t ''Vy C-PML'' w l lc 1'
-  write(20,*) 'pause -1 "Hit any key..."'
-  write(20,*)
-
-  close(20)
-
-  print *
-  print *,'End of the simulation'
-  print *
+  call cpu_time(finish)
+  print '("Time = ",f6.3," seconds.")',finish-start
+! 
+! ! save seismograms
+!   call write_seismograms(sisvx,sisvy,NSTEP,NREC,DELTAT)
+! 
+! ! save total energy
+!   open(unit=20,file='energy.dat',status='unknown')
+!   do it = 1,NSTEP
+!     write(20,*) sngl(dble(it-1)*DELTAT),sngl(total_energy_kinetic(it)), &
+!        sngl(total_energy_potential(it)),sngl(total_energy_kinetic(it) + total_energy_potential(it))
+!   enddo
+!   close(20)
+! 
+! ! create script for Gnuplot for total energy
+!   open(unit=20,file='plot_energy',status='unknown')
+!   write(20,*) '# set term x11'
+!   write(20,*) 'set term postscript landscape monochrome dashed "Helvetica" 22'
+!   write(20,*)
+!   write(20,*) 'set xlabel "Time (s)"'
+!   write(20,*) 'set ylabel "Total energy"'
+!   write(20,*)
+!   write(20,*) 'set output "cpml_total_energy_semilog.eps"'
+!   write(20,*) 'set logscale y'
+!   write(20,*) 'plot "energy.dat" us 1:2 t ''Ec'' w l lc 1, "energy.dat" us 1:3 &
+!               & t ''Ep'' w l lc 3, "energy.dat" us 1:4 t ''Total energy'' w l lc 4'
+!   write(20,*) 'pause -1 "Hit any key..."'
+!   write(20,*)
+!   close(20)
+! 
+!   open(unit=20,file='plot_comparison',status='unknown')
+!   write(20,*) '# set term x11'
+!   write(20,*) 'set term postscript landscape monochrome dashed "Helvetica" 22'
+!   write(20,*)
+!   write(20,*) 'set xlabel "Time (s)"'
+!   write(20,*) 'set ylabel "Total energy"'
+!   write(20,*)
+!   write(20,*) 'set output "compare_total_energy_semilog.eps"'
+!   write(20,*) 'set logscale y'
+!   write(20,*) 'plot "energy.dat" us 1:4 t ''Total energy CPML'' w l lc 1, &
+!               & "../collino/energy.dat" us 1:4 t ''Total energy Collino'' w l lc 2'
+!   write(20,*) 'pause -1 "Hit any key..."'
+!   write(20,*)
+!   close(20)
+! 
+! ! create script for Gnuplot
+!   open(unit=20,file='plotgnu',status='unknown')
+!   write(20,*) 'set term x11'
+!   write(20,*) '# set term postscript landscape monochrome dashed "Helvetica" 22'
+!   write(20,*)
+!   write(20,*) 'set xlabel "Time (s)"'
+!   write(20,*) 'set ylabel "Amplitude (m / s)"'
+!   write(20,*)
+! 
+!   write(20,*) 'set output "v_sigma_Vx_receiver_001.eps"'
+!   write(20,*) 'plot "Vx_file_001.dat" t ''Vx C-PML'' w l lc 1'
+!   write(20,*) 'pause -1 "Hit any key..."'
+!   write(20,*)
+! 
+!   write(20,*) 'set output "v_sigma_Vy_receiver_001.eps"'
+!   write(20,*) 'plot "Vy_file_001.dat" t ''Vy C-PML'' w l lc 1'
+!   write(20,*) 'pause -1 "Hit any key..."'
+!   write(20,*)
+! 
+!   write(20,*) 'set output "v_sigma_Vx_receiver_002.eps"'
+!   write(20,*) 'plot "Vx_file_002.dat" t ''Vx C-PML'' w l lc 1'
+!   write(20,*) 'pause -1 "Hit any key..."'
+!   write(20,*)
+! 
+!   write(20,*) 'set output "v_sigma_Vy_receiver_002.eps"'
+!   write(20,*) 'plot "Vy_file_002.dat" t ''Vy C-PML'' w l lc 1'
+!   write(20,*) 'pause -1 "Hit any key..."'
+!   write(20,*)
+! 
+!   close(20)
+! 
+!   print *
+!   print *,'End of the simulation'
+!   print *
 
   end program seismic_CPML_2D_iso_fourth
 
