@@ -149,7 +149,7 @@
 ! total number of time steps
   integer, parameter :: NX = 1001
   integer, parameter :: NY = NX
-  integer, parameter :: NSTEP = 4000
+  integer, parameter :: NSTEP = 100
 
 ! size of a grid cell
   double precision, parameter :: DELTAX = 1.5d0
